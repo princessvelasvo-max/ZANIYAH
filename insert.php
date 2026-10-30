@@ -69,9 +69,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if ($insert->execute()) {
 
-        $insert->close();
-        $conn->close();
-
         echo "
         <!DOCTYPE html>
         <html>
