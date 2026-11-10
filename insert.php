@@ -1,130 +1,61 @@
-
 <?php
-
+session_start();
 include("db.php");
 
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
-
-    $productId = (int)$_POST["product_id"];
-    $quantity = (int)$_POST["quantity"];
-    $buyer = trim($_POST["buyer"]);
-    $contact = trim($_POST["contact"]);
-
-    // Validate inputs
-    if (
-        $productId <= 0 ||
-        $quantity <= 0 ||
-        $buyer === "" ||
-        $contact === ""
-    ) {
-        die("Please complete all required fields.");
-    }
-
-    // Get product price from database
-    $stmt = $conn->prepare(
-        "SELECT Price FROM fruitsandveggies_tbl WHERE Product = ?"
-    );
-
-    if (!$stmt) {
-        die("Database error: " . htmlspecialchars($conn->error));
-    }
-
-    $stmt->bind_param("i", $productId);
-    $stmt->execute();
-
-    $result = $stmt->get_result();
-
-    if ($result->num_rows === 0) {
-        die("Product not found.");
-    }
-
-    $product = $result->fetch_assoc();
-
-    $price = (float)$product["Price"];
-
-    // Calculate total
-    $total = $price * $quantity;
-
-    $stmt->close();
-
-    // Insert order into orders_tbl
-    $insert = $conn->prepare(
-        "INSERT INTO orders_tbl
-        (Productid, Qty, Total, User, Contact)
-        VALUES (?, ?, ?, ?, ?)"
-    );
-
-    if (!$insert) {
-        die("Database error: " . htmlspecialchars($conn->error));
-    }
-
-    $insert->bind_param(
-        "iidss",
-        $productId,
-        $quantity,
-        $total,
-        $buyer,
-        $contact
-    );
-
-    if ($insert->execute()) {
-
-        echo "
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Order Submitted</title>
-            <link href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css' rel='stylesheet'>
-        </head>
-
-        <body style='background-color:#fff5f2;'>
-
-            <div class='container mt-5 text-center'>
-
-                <div class='card p-5 shadow-sm'>
-
-                    <h2 class='text-success'>
-                        Order Submitted Successfully!
-                    </h2>
-
-                    <p>Your order has been saved to the database.</p>
-
-                    <h5>Order Details</h5>
-
-                    <p>Quantity: " . htmlspecialchars((string)$quantity) . "</p>
-
-                    <p>Buyer's Name: " . htmlspecialchars($buyer) . "</p>
-
-                    <p>Mobile Number: " . htmlspecialchars($contact) . "</p>
-
-                    <p>Total: ₱" . number_format($total, 2) . "</p>
-
-                    <a href='index.php' class='btn btn-danger mt-3'>
-                        Back to Home
-                    </a>
-
-                </div>
-
-            </div>
-
-        </body>
-        </html>
-        ";
-
-    } else {
-
-        echo "Error saving order: " . htmlspecialchars($insert->error);
-
-    }
-
-    $insert->close();
-    $conn->close();
-
-} else {
-
+// The form uses method="POST"
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     header("Location: index.php");
     exit;
-
 }
 
-?>
+$productid = (int)($_POST["product_id"] ?? 0);
+$qty       = (int)($_POST["Qty"] ?? 0);
+$user      = trim($_POST["User"] ?? "");
+$contact   = trim($_POST["Contact"] ?? "");
+
+if ($productid <= 0 || $qty <= 0 || $user === "" || $contact === "") {
+    die("Missing or invalid order details. <a href='index.php'>Go back</a>");
+}
+
+// Get the real product details from the database
+$stmt = $conn->prepare("SELECT Fruit, Price, Image FROM fruitsandveggies_tbl WHERE Product = ?");
+$stmt->bind_param("i", $productid);
+$stmt->execute();
+$product = $stmt->get_result()->fetch_assoc();
+$stmt->close();
+
+if (!$product) {
+    die("Product not found. <a href='index.php'>Go back</a>");
+}
+
+$total = $product["Price"] * $qty;
+
+// Save the order
+$stmt = $conn->prepare("INSERT INTO orders_tbl (Productid, Qty, Total, User, Contact) VALUES (?, ?, ?, ?, ?)");
+if (!$stmt) {
+    die("Database error: " . $conn->error);
+}
+$stmt->bind_param("iidss", $productid, $qty, $total, $user, $contact);
+
+if ($stmt->execute()) {
+    $orderId = $conn->insert_id;   // 0 if the orders table has no auto-increment id
+    $stmt->close();
+
+    // Keep the details so the confirmation page can show them
+    $_SESSION["last_order"] = [
+        "number"  => $orderId > 0 ? str_pad((string)$orderId, 6, "0", STR_PAD_LEFT) : strtoupper(substr(uniqid(), -6)),
+        "product" => $product["Fruit"],
+        "image"   => $product["Image"],
+        "price"   => (float)$product["Price"],
+        "qty"     => $qty,
+        "total"   => (float)$total,
+        "user"    => $user,
+        "contact" => $contact,
+        "time"    => date("M d, Y h:i A"),
+    ];
+
+    header("Location: order-success.php");
+    exit;
+}
+
+die("Could not save order: " . $stmt->error . " <a href='index.php'>Go back</a>");
